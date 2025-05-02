@@ -6,19 +6,15 @@ project(${project_name})
 
 file(GLOB_RECURSE src_files
     "test/*.cpp"
-)
-
-file(GLOB_RECURSE inc_files
-    "include/*.hpp"
+    "observable/*.hpp"
 )
 
 add_executable(${project_name}
     ${src_files}
-    ${inc_files}
 )
 
 target_include_directories(${project_name} PUBLIC
-    "include/"
+    "./"
 )
 
 set_target_properties(${project_name} PROPERTIES

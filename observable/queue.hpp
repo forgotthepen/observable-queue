@@ -24,7 +24,10 @@ SOFTWARE.
 
 #pragma once
 
+#include <type_traits>
+#include <typeinfo>
 #include <functional>
+#include <memory>
 #include <thread>
 #include <condition_variable>
 #include <mutex>
@@ -36,8 +39,70 @@ SOFTWARE.
 namespace obs {
     template<typename Ty, bool IsThreaded = true>
     class queue {
+    private:
+        template<typename Tany>
+        struct fn_type {
+            template<typename Tignore>
+            inline constexpr static const std::type_info& type(Tignore &&) {
+                return typeid(Tany);
+            }
+        };
+
+        template<typename Tany>
+        struct fn_type<std::function<Tany>> {
+            inline static const std::type_info& type(const std::function<Tany> &fn) noexcept {
+                return fn.target_type();
+            }
+        };
+
     public:
-        using t_consumer = std::function<void(Ty &)>;
+        class t_consumer {
+        private:
+            struct ICallableConsumer {
+                virtual ~ICallableConsumer() { } // in case the child is a type with a dtor
+                virtual void operator ()(Ty& item)  = 0;
+                virtual const std::type_info& type() const noexcept = 0;
+            };
+
+            template<typename Tfn>
+            class CallableConsumerImpl : public ICallableConsumer {
+            private:
+                using TfnObj = typename std::remove_cv<typename std::remove_reference<Tfn>::type>::type;
+
+                TfnObj fn_;
+
+            public:
+                CallableConsumerImpl(TfnObj fn):
+                    fn_( std::move(fn) )
+                { }
+
+                void operator ()(Ty& item) override {
+                    fn_( item );
+                }
+
+                const std::type_info& type() const noexcept override {
+                    return fn_type<Tfn>::type(fn_);
+                }
+            };
+
+            std::unique_ptr<ICallableConsumer> callable_consumer_;
+
+        public:
+            template<typename Tfn>
+            t_consumer(Tfn &&fn):
+                callable_consumer_(new CallableConsumerImpl<Tfn>(
+                    std::forward<Tfn>(fn)
+                ))
+            { }
+
+            inline void operator ()(Ty& item) const {
+                (*callable_consumer_)(item);
+            }
+            
+            inline const std::type_info& type() const {
+                return callable_consumer_->type();
+            }
+        };
 
     private:
         std::thread thread_;
@@ -51,14 +116,21 @@ namespace obs {
         std::list<t_consumer> consumers_{};
 
         void kill() {
-            if (kill_) {
-                return;
+            {
+                std::lock_guard<std::mutex> lock(mtx_);
+
+                if (kill_) {
+                    return;
+                }
+
+                kill_ = true;
+
+                if (IsThreaded) {
+                    cv_.notify_one();
+                }
             }
 
-            kill_ = true;
-
             if (IsThreaded) {
-                cv_.notify_one();
                 thread_.join();
             }
         }
@@ -139,6 +211,7 @@ namespace obs {
         template<typename ...Args>
         Ty& emplace_back(Args ...args) {
             Ty *item;
+
             {
                 std::lock_guard<std::mutex> lock(mtx_);
     
@@ -152,34 +225,42 @@ namespace obs {
             return *item;
         }
         
-        bool try_pop_front() {
+        bool try_pop_front(Ty *obj = nullptr) {
             std::lock_guard<std::mutex> lock(mtx_);
 
             if (queue_.empty()) {
                 return false;
             }
 
+            if (obj) {
+                *obj = std::move( queue_.front() );
+            }
+
             queue_.pop_front();
             return true;
         }
 
-        queue<Ty>& operator +=(const t_consumer &consumer) {
+        template<typename Tfn>
+        queue<Ty>& operator +=(Tfn &&consumer) {
             std::lock_guard<std::mutex> lock(mtx_consumers_);
 
-            bool exists = std::any_of(consumers_.begin(), consumers_.end(), [&consumer](const t_consumer &item){
-                return item.target_type() == consumer.target_type();
+            const auto &consumer_type = fn_type<Tfn>::type(std::forward<Tfn>(consumer));
+            bool exists = std::any_of(consumers_.begin(), consumers_.end(), [&consumer_type](const t_consumer &item){
+                return item.type() == consumer_type;
             });
             if (!exists) {
-                consumers_.emplace_back(consumer);
+                consumers_.emplace_back(std::forward<Tfn>(consumer));
             }
             return *this;
         }
 
-        queue<Ty>& operator -=(const t_consumer &consumer) {
+        template<typename Tfn>
+        queue<Ty>& operator -=(Tfn &&consumer) {
             std::lock_guard<std::mutex> lock(mtx_consumers_);
 
-            consumers_.remove_if([&consumer](const t_consumer &item){
-                return item.target_type() == consumer.target_type();
+            const auto &consumer_type = fn_type<Tfn>::type(std::forward<Tfn>(consumer));
+            consumers_.remove_if([&consumer_type](const t_consumer &item){
+                return item.type() == consumer_type;
             });
             return *this;
         }
@@ -196,7 +277,7 @@ namespace obs {
             return consumers_.size();
         }
 
-        void poll() {
+        inline void poll() {
             if (!IsThreaded) {
                 worker_fn();                
             }
