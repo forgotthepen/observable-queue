@@ -24,8 +24,8 @@ SOFTWARE.
 
 #pragma once
 
-#include <type_traits>
-#include <typeinfo>
+#include <type_traits> // std::remove_cv, std::remove_reference, ...
+#include <typeinfo> // std::type_info
 #include <functional>
 #include <memory>
 #include <thread>
@@ -41,7 +41,7 @@ namespace obs {
     class queue {
     private:
         template<typename Tany>
-        struct fn_type {
+        struct fn_traits {
             template<typename Tignore>
             inline constexpr static const std::type_info& type(Tignore &&) {
                 return typeid(Tany);
@@ -49,7 +49,7 @@ namespace obs {
         };
 
         template<typename Tany>
-        struct fn_type<std::function<Tany>> {
+        struct fn_traits<std::function<Tany>> {
             inline static const std::type_info& type(const std::function<Tany> &fn) noexcept {
                 return fn.target_type();
             }
@@ -60,7 +60,7 @@ namespace obs {
         private:
             struct ICallableConsumer {
                 virtual ~ICallableConsumer() { } // in case the child is a type with a dtor
-                virtual void operator ()(Ty& item)  = 0;
+                virtual void operator ()(Ty &item) = 0;
                 virtual const std::type_info& type() const noexcept = 0;
             };
 
@@ -76,12 +76,12 @@ namespace obs {
                     fn_( std::move(fn) )
                 { }
 
-                void operator ()(Ty& item) override {
+                void operator ()(Ty &item) override {
                     fn_( item );
                 }
 
                 const std::type_info& type() const noexcept override {
-                    return fn_type<Tfn>::type(fn_);
+                    return fn_traits<TfnObj>::type(fn_);
                 }
             };
 
@@ -95,7 +95,7 @@ namespace obs {
                 ))
             { }
 
-            inline void operator ()(Ty& item) const {
+            inline void operator ()(Ty &item) const {
                 (*callable_consumer_)(item);
             }
             
@@ -124,13 +124,10 @@ namespace obs {
                 }
 
                 kill_ = true;
-
-                if (IsThreaded) {
-                    cv_.notify_one();
-                }
             }
 
             if (IsThreaded) {
+                cv_.notify_one();
                 thread_.join();
             }
         }
@@ -244,7 +241,7 @@ namespace obs {
         queue<Ty>& operator +=(Tfn &&consumer) {
             std::lock_guard<std::mutex> lock(mtx_consumers_);
 
-            const auto &consumer_type = fn_type<Tfn>::type(std::forward<Tfn>(consumer));
+            const auto &consumer_type = fn_traits<Tfn>::type(std::forward<Tfn>(consumer));
             bool exists = std::any_of(consumers_.begin(), consumers_.end(), [&consumer_type](const t_consumer &item){
                 return item.type() == consumer_type;
             });
@@ -258,7 +255,7 @@ namespace obs {
         queue<Ty>& operator -=(Tfn &&consumer) {
             std::lock_guard<std::mutex> lock(mtx_consumers_);
 
-            const auto &consumer_type = fn_type<Tfn>::type(std::forward<Tfn>(consumer));
+            const auto &consumer_type = fn_traits<Tfn>::type(std::forward<Tfn>(consumer));
             consumers_.remove_if([&consumer_type](const t_consumer &item){
                 return item.type() == consumer_type;
             });

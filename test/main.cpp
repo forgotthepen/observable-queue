@@ -55,16 +55,16 @@ struct MyCallable {
         std::cout << "** ~MyCallable()" << '\n';
     }
     MyCallable& operator =(const MyCallable &other) {
-        std::cout << "** MyCallable +(copy)" << '\n';
+        std::cout << "** MyCallable =(copy)" << '\n';
         return *this;
     }
     MyCallable& operator =(MyCallable &&other) {
-        std::cout << "** MyCallable +(move)" << '\n';
+        std::cout << "** MyCallable =(move)" << '\n';
         return *this;
     }
 
-    void operator () (MyStr &str) const {
-        std::cout << "  (( MyStr ()(call)" << '\n';
+    void operator () (MyStr &str)  {
+        std::cout << "  (()) MyStr ()(call): " << str.str << '\n';
     }
 };
 
