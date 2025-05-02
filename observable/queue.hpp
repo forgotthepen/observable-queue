@@ -26,15 +26,16 @@ SOFTWARE.
 
 #include <type_traits> // std::remove_cv, std::remove_reference, ...
 #include <typeinfo> // std::type_info
-#include <functional>
-#include <memory>
+#include <functional> // std::function
+#include <memory> // std::unique_ptr
 #include <thread>
 #include <condition_variable>
 #include <mutex>
 #include <list>
 #include <cstdlib> // std::size_t
-#include <utility>
-#include <algorithm>
+#include <utility> // std::move, std::forward, ...
+#include <algorithm> // std::any_of
+
 
 namespace obs {
     template<typename Ty, bool IsThreaded = true>
