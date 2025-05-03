@@ -207,7 +207,7 @@ namespace obs {
         }
 
         template<typename ...Args>
-        Ty& emplace_back(Args ...args) {
+        Ty& emplace_back(Args&& ...args) {
             Ty *item;
 
             {
